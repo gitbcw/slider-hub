@@ -12,11 +12,12 @@ export async function POST(request: Request) {
     const title = formData.get("title");
 
     if (!(file instanceof File)) {
-      return NextResponse.json({ error: "请选择一个 zip 文件。" }, { status: 400 });
+      return NextResponse.json({ error: "请选择一个 zip 或 pptx 文件。" }, { status: 400 });
     }
 
-    if (!file.name.toLowerCase().endsWith(".zip")) {
-      return NextResponse.json({ error: "只支持上传 .zip 压缩包。" }, { status: 400 });
+    const lowerName = file.name.toLowerCase();
+    if (!lowerName.endsWith(".zip") && !lowerName.endsWith(".pptx")) {
+      return NextResponse.json({ error: "只支持上传 .zip 或 .pptx 文件。" }, { status: 400 });
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());

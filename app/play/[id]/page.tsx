@@ -1,7 +1,8 @@
-import { ArrowLeft, Maximize2, ExternalLink, Presentation } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, Maximize2, Presentation } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getSlider } from "@/lib/sliders";
+import { getSlider, sliderType } from "@/lib/sliders";
+import PptxPlayer from "./PptxPlayer";
 
 export default async function PlayerPage({
   params
@@ -14,6 +15,7 @@ export default async function PlayerPage({
     notFound();
   }
 
+  const type = sliderType(slider);
   const src = `/api/sliders/${slider.id}/files`;
 
   return (
@@ -27,18 +29,24 @@ export default async function PlayerPage({
           <Link className="icon-button" href="/" title="返回列表">
             <ArrowLeft size={16} />
           </Link>
-          <a className="icon-button" href={src} target="_blank" title="新窗口打开">
-            <ExternalLink size={16} />
+          <a className="icon-button" href={src} target="_blank" title={type === "pptx" ? "下载 PPTX" : "新窗口打开"}>
+            {type === "pptx" ? <Download size={16} /> : <ExternalLink size={16} />}
           </a>
-          <a className="button" href={src} target="_blank">
-            <Maximize2 size={16} />
-            全屏播放
-          </a>
+          {type === "html" ? (
+            <a className="button" href={src} target="_blank">
+              <Maximize2 size={16} />
+              全屏播放
+            </a>
+          ) : null}
         </div>
       </header>
 
       <div className="frame-wrap">
-        <iframe className="slider-frame" src={src} title={slider.title} allowFullScreen />
+        {type === "pptx" ? (
+          <PptxPlayer src={src} title={slider.title} />
+        ) : (
+          <iframe className="slider-frame" src={src} title={slider.title} allowFullScreen />
+        )}
       </div>
     </main>
   );

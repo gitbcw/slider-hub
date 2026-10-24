@@ -3,6 +3,8 @@ import { randomUUID } from "crypto";
 import path from "path";
 import AdmZip from "adm-zip";
 
+export type SliderType = "html" | "pptx";
+
 export type Slider = {
   id: string;
   title: string;
@@ -10,6 +12,7 @@ export type Slider = {
   createdAt: string;
   size: number;
   entry: string;
+  type?: SliderType;
 };
 
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -27,8 +30,9 @@ export async function ensureStorage() {
 
 export async function listSliders(): Promise<Slider[]> {
   await ensureStorage();
-  const raw = await readFile(DB_PATH, "utf8");
-  const sliders = JSON.parse(raw) as Slider[];
+  const raw = (await readFile(DB_PATH, "utf8")).replace(/^\uFEFF/, "");
+  const parsed = JSON.parse(raw) as Slider[] | Slider;
+  const sliders = Array.isArray(parsed) ? parsed : [parsed];
   return sliders.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
@@ -59,9 +63,62 @@ export async function createSlider(params: {
   const targetDir = path.join(SLIDERS_DIR, id);
   await mkdir(targetDir, { recursive: true });
 
+  const lowerName = params.fileName.toLowerCase();
+  if (lowerName.endsWith(".pptx")) {
+    return createPptxSlider({ ...params, id, targetDir });
+  }
+
+  if (!lowerName.endsWith(".zip")) {
+    await rm(targetDir, { recursive: true, force: true });
+    throw new Error("只支持上传 .zip 或 .pptx 文件。");
+  }
+
+  return createHtmlSlider({ ...params, id, targetDir });
+}
+
+async function createPptxSlider(params: {
+  id: string;
+  targetDir: string;
+  fileName: string;
+  title?: string;
+  buffer: Buffer;
+}) {
+  try {
+    new AdmZip(params.buffer);
+  } catch {
+    await rm(params.targetDir, { recursive: true, force: true });
+    throw new Error("PPTX 文件无效或已损坏。");
+  }
+
+  const entry = "presentation.pptx";
+  await writeFile(path.join(params.targetDir, entry), params.buffer);
+
+  const slider: Slider = {
+    id: params.id,
+    title: params.title?.trim() || fileNameToTitle(params.fileName),
+    originalName: params.fileName,
+    createdAt: new Date().toISOString(),
+    size: params.buffer.byteLength,
+    entry,
+    type: "pptx"
+  };
+
+  const sliders = await listSliders();
+  await saveSliders([slider, ...sliders]);
+  return slider;
+}
+
+async function createHtmlSlider(params: {
+  id: string;
+  targetDir: string;
+  fileName: string;
+  title?: string;
+  buffer: Buffer;
+}) {
   const zip = new AdmZip(params.buffer);
   const entries = zip.getEntries().filter((entry) => !entry.isDirectory);
   if (entries.length === 0) {
+    await rm(params.targetDir, { recursive: true, force: true });
     throw new Error("压缩包里没有可用文件。");
   }
 
@@ -69,11 +126,13 @@ export async function createSlider(params: {
   for (const entry of entries) {
     const normalized = entry.entryName.replace(/\\/g, "/");
     if (normalized.includes("..") || path.isAbsolute(normalized)) {
+      await rm(params.targetDir, { recursive: true, force: true });
       throw new Error("压缩包包含不安全路径。");
     }
 
-    const outputPath = path.resolve(targetDir, normalized);
-    if (!outputPath.startsWith(targetDir)) {
+    const outputPath = path.resolve(params.targetDir, normalized);
+    if (!outputPath.startsWith(params.targetDir)) {
+      await rm(params.targetDir, { recursive: true, force: true });
       throw new Error("压缩包包含越界路径。");
     }
 
@@ -86,17 +145,18 @@ export async function createSlider(params: {
   }
 
   if (!indexPath) {
-    await rm(targetDir, { recursive: true, force: true });
+    await rm(params.targetDir, { recursive: true, force: true });
     throw new Error("没有找到 index.html。请上传包含 HTML slider 入口文件的 zip。");
   }
 
   const slider: Slider = {
-    id,
+    id: params.id,
     title: params.title?.trim() || fileNameToTitle(params.fileName),
     originalName: params.fileName,
     createdAt: new Date().toISOString(),
     size: params.buffer.byteLength,
-    entry: indexPath
+    entry: indexPath,
+    type: "html"
   };
 
   const sliders = await listSliders();
@@ -177,8 +237,13 @@ export function contentTypeFor(filePath: string) {
     ".mp4": "video/mp4",
     ".webm": "video/webm",
     ".mp3": "audio/mpeg",
-    ".wav": "audio/wav"
+    ".wav": "audio/wav",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
   };
 
   return types[ext] ?? "application/octet-stream";
+}
+
+export function sliderType(slider: Slider): SliderType {
+  return slider.type ?? (slider.entry.toLowerCase().endsWith(".pptx") ? "pptx" : "html");
 }
